@@ -23,7 +23,7 @@ import socket
 import re
 # you may use urllib to encode data appropriately
 import urllib
-from urlparse import urlparse
+import urlparse
 
 
 def help():
@@ -84,27 +84,53 @@ class HTTPClient(object):
         get_request = ("GET %s HTTP/1.1\r\n"
                        "Host: %s\r\n"
                        "Connection: close\r\n"
-                       "Content-Length: %s\r\n\r\n%s")
-        return self.issue_command(url, get_request, args)
+                       "Content-Length: 0\r\n\r\n")
+        parsed_url = urlparse.urlsplit(url)
+        host = parsed_url.netloc.split(':')[0]
+        path = parsed_url.path if parsed_url.path else '/'
+        encoded_args = urllib.urlencode(args) if args else ''
+
+        params = ''
+        if parsed_url.query:
+            params += ('?' + parsed_url.query)
+        if encoded_args:
+            params += ('?' if not params else '&')
+            params += encoded_args
+
+        path += params
+        get_request = get_request % (path, host)
+
+        return self.issue_command(parsed_url.hostname, parsed_url.port,
+                                  get_request)
 
     def POST(self, url, args=None):
         """Implements POST"""
         post_request = ("POST %s HTTP/1.1\r\n"
                         "Host: %s\r\n"
                         "Connection: close\r\n"
-                        "Content-Length: %s\r\n"
+                        "Content-Length: %d\r\n"
                         "Content-type: application/x-www-form-urlencoded"
                         "\r\n\r\n%s")
-        return self.issue_command(url, post_request, args)
-
-    def issue_command(self, url, request, args=None):
-        parsed_url = urlparse(url)
-        self.connect(parsed_url.hostname, parsed_url.port)
-        path, host = parsed_url.path, parsed_url.netloc
-
+        parsed_url = urlparse.urlsplit(url)
+        host = parsed_url.netloc.split(':')[0]
+        path = parsed_url.path if parsed_url.path else '/'
         encoded_args = urllib.urlencode(args) if args else ''
-        self.sock.send(request % (path, host, len(encoded_args),
-                                  encoded_args))
+
+        post_request = post_request % (path, host, len(encoded_args),
+                                       encoded_args)
+
+        return self.issue_command(parsed_url.hostname, parsed_url.port,
+                                  post_request)
+
+    def issue_command(self, hostname, port, request):
+        """Send request and receive response."""
+        self.connect(hostname, port)
+        try:
+            self.sock.send(request)
+        except socket.error:
+            print "Unable to send request '%s'" % request
+            sys.exit(1)
+
         data = self.recvall(self.sock)
         code = self.get_code(data)
         body = self.get_body(data)
